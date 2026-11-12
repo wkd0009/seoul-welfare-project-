@@ -2,10 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# --------------------------------------------------
+# -----------------------------------------
 # 기본 설정
-# --------------------------------------------------
-
+# -----------------------------------------
 st.set_page_config(
     page_title="서울 지하철 혼잡도 분석",
     page_icon="🚇",
@@ -13,243 +12,195 @@ st.set_page_config(
 )
 
 st.title("🚇 서울 지하철 노선별 혼잡도 분석")
+st.write("2023년과 2025년의 서울 지하철 노선별 혼잡도를 비교합니다.")
 
-st.markdown(
-    """
-    **2023년과 2025년 서울 지하철 노선별 평균 혼잡도를 비교하여
-    노선별 혼잡도 변화와 혼잡 관리 방안을 분석합니다.**
-    """
-)
-
-# --------------------------------------------------
+# -----------------------------------------
 # 데이터 불러오기
-# --------------------------------------------------
+# -----------------------------------------
+file_path = "지하철+혼잡도_20261111105028.csv"
 
-@st.cache_data
-def load_data():
+try:
+    df = pd.read_csv(file_path, encoding="cp949")
+except UnicodeDecodeError:
+    df = pd.read_csv(file_path, encoding="utf-8-sig")
+except FileNotFoundError:
+    st.error(f"데이터 파일을 찾을 수 없습니다: {file_path}")
+    st.stop()
 
-    file_path = "지하철+혼잡도_20261111105028.csv"
+# -----------------------------------------
+# 데이터 전처리
+# -----------------------------------------
+df["시점"] = df["시점"].astype(str)
 
-    raw = pd.read_csv(
-        file_path,
-        encoding="utf-8-sig",
-        header=None
-    )
+# 시점에서 연도 추출
+df["연도"] = df["시점"].str[:4]
 
-    # 데이터 행 추출
-    years = raw.iloc[2:, 0].astype(str)
-
-    data = raw.iloc[2:, 1:].copy()
-
-    columns = [
-        "평균",
-        "1호선",
-        "2호선",
-        "3호선",
-        "4호선",
-        "5호선",
-        "6호선",
-        "7호선",
-        "8호선",
-        "9호선",
-        "우이신설선",
-        "신림선"
-    ]
-
-    data.columns = columns
-
-    data.insert(
-        0,
-        "연도",
-        years.values
-    )
-
-    # 숫자로 변환
-    for col in columns:
-        data[col] = pd.to_numeric(
-            data[col],
-            errors="coerce"
-        )
-
-    return data
-
-
-df = load_data()
-
-# --------------------------------------------------
-# 노선 목록
-# --------------------------------------------------
-
+# 분석할 노선 목록
 lines = [
-    "1호선",
-    "2호선",
-    "3호선",
-    "4호선",
-    "5호선",
-    "6호선",
-    "7호선",
-    "8호선",
-    "9호선",
-    "우이신설선",
-    "신림선"
+    "1호선", "2호선", "3호선", "4호선", "5호선",
+    "6호선", "7호선", "8호선", "9호선",
+    "우이신설선", "신림선"
 ]
 
-# ==================================================
-# 노선 선택 기능
-# ==================================================
+# -----------------------------------------
+# 제목
+# -----------------------------------------
+st.header("📊 전체 노선 혼잡도 변화")
 
-st.header("🚇 노선을 선택해 보세요")
-
-selected_line = st.selectbox(
-    "분석할 노선을 선택하세요.",
-    lines
+st.write(
+    "변화량은 **2025년 혼잡도 - 2023년 혼잡도**로 계산합니다. "
+    "양수이면 혼잡도가 증가했고, 음수이면 감소한 것입니다."
 )
 
-# --------------------------------------------------
-# 선택된 노선의 데이터 추출
-# --------------------------------------------------
+# -----------------------------------------
+# 2023년 / 2025년 데이터 추출
+# -----------------------------------------
+try:
+    data_2023 = df[df["연도"] == "2023"].iloc[0]
+    data_2025 = df[df["연도"] == "2025"].iloc[0]
+except IndexError:
+    st.error("2023년 또는 2025년 데이터를 찾을 수 없습니다.")
+    st.stop()
 
-value_2023 = df.loc[
-    df["연도"] == "2023",
-    selected_line
-].iloc[0]
+# -----------------------------------------
+# 전체 노선 변화량 계산
+# -----------------------------------------
+change_data = []
 
-value_2025 = df.loc[
-    df["연도"] == "2025",
-    selected_line
-].iloc[0]
+for line in lines:
+    try:
+        value_2023 = float(data_2023[line])
+        value_2025 = float(data_2025[line])
 
-change = value_2025 - value_2023
+        change = value_2025 - value_2023
 
-# ==================================================
-# 선택 노선의 핵심 수치
-# ==================================================
+        change_data.append({
+            "노선": line,
+            "2023년": value_2023,
+            "2025년": value_2025,
+            "변화량": change
+        })
 
-st.subheader(f"📊 {selected_line} 혼잡도 분석")
+    except (KeyError, ValueError, TypeError):
+        # 해당 노선의 데이터가 없거나 숫자로 변환할 수 없는 경우
+        continue
 
-col1, col2, col3 = st.columns(3)
+change_df = pd.DataFrame(change_data)
 
-with col1:
-    st.metric(
-        label="2023년 혼잡도",
-        value=f"{value_2023:.1f}%"
-    )
+# 데이터가 하나도 없을 경우
+if change_df.empty:
+    st.error("분석할 노선 데이터가 없습니다.")
+    st.stop()
 
-with col2:
-    st.metric(
-        label="2025년 혼잡도",
-        value=f"{value_2025:.1f}%"
-    )
+# -----------------------------------------
+# 1. 혼잡도 증가 TOP 5
+# -----------------------------------------
+st.header("🔴 혼잡도 증가 TOP 5")
 
-with col3:
-    st.metric(
-        label="변화량",
-        value=f"{change:+.1f}%p"
-    )
+increase_df = change_df[change_df["변화량"] > 0].copy()
 
-# ==================================================
-# 변화량에 따른 동적 메시지
-# ==================================================
+# 증가폭이 큰 순서대로 정렬
+increase_df = increase_df.sort_values(
+    by="변화량",
+    ascending=False
+).head(5)
 
-if change > 0:
-
-    st.error(
-        f"🔴 {selected_line}은(는) "
-        f"2023년 대비 혼잡도가 "
-        f"**{change:.1f}%p 증가했습니다.**"
-    )
-
-elif change < 0:
-
-    st.success(
-        f"🟢 {selected_line}은(는) "
-        f"2023년 대비 혼잡도가 "
-        f"**{abs(change):.1f}%p 감소했습니다.**"
-    )
-
+if increase_df.empty:
+    st.info("혼잡도가 증가한 노선이 없습니다.")
 else:
-
-    st.info(
-        f"🔵 {selected_line}은(는) "
-        f"2023년과 2025년의 혼잡도가 "
-        f"**변화하지 않았습니다.**"
+    increase_df = increase_df.reset_index(drop=True)
+    increase_df.insert(
+        0,
+        "순위",
+        range(1, len(increase_df) + 1)
     )
 
-# ==================================================
-# 선택 노선의 2023 vs 2025 그래프
-# ==================================================
+    # 화면 표시용 데이터
+    increase_display = increase_df[
+        ["순위", "노선", "변화량"]
+    ].copy()
 
-st.subheader(f"📈 {selected_line} 연도별 혼잡도")
+    increase_display["변화량"] = increase_display["변화량"].apply(
+        lambda x: f"+{x:.1f}%p"
+    )
 
-line_chart_data = pd.DataFrame({
-    "연도": ["2023년", "2025년"],
-    "혼잡도": [
-        value_2023,
-        value_2025
-    ]
-})
+    st.dataframe(
+        increase_display,
+        use_container_width=True,
+        hide_index=True
+    )
 
-fig_selected = px.bar(
-    line_chart_data,
-    x="연도",
-    y="혼잡도",
-    text_auto=".1f",
-    title=f"{selected_line} 2023년 vs 2025년 혼잡도",
-    labels={
-        "연도": "연도",
-        "혼잡도": "평균 혼잡도 (%)"
-    }
-)
+# -----------------------------------------
+# 2. 혼잡도 감소 TOP 5
+# -----------------------------------------
+st.header("🔵 혼잡도 감소 TOP 5")
 
-fig_selected.update_layout(
-    yaxis_title="평균 혼잡도 (%)",
-    xaxis_title=""
-)
+decrease_df = change_df[change_df["변화량"] < 0].copy()
 
-st.plotly_chart(
-    fig_selected,
-    use_container_width=True
-)
+# 감소폭이 큰 순서대로 정렬
+# 예: -22.6이 -5.3보다 먼저 나오도록 절댓값 기준으로 정렬
+decrease_df["감소폭"] = decrease_df["변화량"].abs()
 
-# ==================================================
-# 전체 노선 비교
-# ==================================================
+decrease_df = decrease_df.sort_values(
+    by="감소폭",
+    ascending=False
+).head(5)
 
-st.header("📊 전체 노선 혼잡도 비교")
+if decrease_df.empty:
+    st.info("혼잡도가 감소한 노선이 없습니다.")
+else:
+    decrease_df = decrease_df.reset_index(drop=True)
+    decrease_df.insert(
+        0,
+        "순위",
+        range(1, len(decrease_df) + 1)
+    )
 
-selected_year = st.selectbox(
-    "비교할 연도를 선택하세요.",
-    ["2023", "2025"],
-    key="year_select"
-)
+    # 화면 표시용 데이터
+    decrease_display = decrease_df[
+        ["순위", "노선", "변화량"]
+    ].copy()
 
-year_data = df[
-    df["연도"] == selected_year
-].iloc[0]
+    decrease_display["변화량"] = decrease_display["변화량"].apply(
+        lambda x: f"{x:.1f}%p"
+    )
 
-chart_data = pd.DataFrame({
-    "노선": lines,
-    "혼잡도": [
-        year_data[line]
-        for line in lines
-    ]
-})
+    st.dataframe(
+        decrease_display,
+        use_container_width=True,
+        hide_index=True
+    )
 
-chart_data = chart_data.sort_values(
-    "혼잡도",
+# -----------------------------------------
+# 3. 노선별 혼잡도 변화 전체 그래프
+# -----------------------------------------
+st.header("📈 전체 노선 혼잡도 변화량")
+
+graph_df = change_df.sort_values(
+    by="변화량",
     ascending=False
 )
 
 fig = px.bar(
-    chart_data,
+    graph_df,
     x="노선",
-    y="혼잡도",
-    title=f"{selected_year} 노선별 평균 혼잡도",
-    text_auto=".1f",
+    y="변화량",
+    text="변화량",
     labels={
         "노선": "지하철 노선",
-        "혼잡도": "평균 혼잡도 (%)"
-    }
+        "변화량": "혼잡도 변화량 (%p)"
+    },
+    title="2023년 대비 2025년 노선별 혼잡도 변화"
+)
+
+fig.update_traces(
+    texttemplate="%{text:.1f}%p",
+    textposition="outside"
+)
+
+fig.add_hline(
+    y=0,
+    line_width=1
 )
 
 st.plotly_chart(
@@ -257,166 +208,102 @@ st.plotly_chart(
     use_container_width=True
 )
 
-# ==================================================
-# 2023 vs 2025 전체 비교
-# ==================================================
+# -----------------------------------------
+# 4. 노선 선택 기능
+# -----------------------------------------
+st.header("🚇 개별 노선 분석")
 
-st.header("📈 2023년 vs 2025년 전체 노선 비교")
+selected_line = st.selectbox(
+    "분석할 노선을 선택하세요.",
+    lines
+)
 
-comparison = []
+selected_data = change_df[
+    change_df["노선"] == selected_line
+]
 
-for line in lines:
+if selected_data.empty:
+    st.warning("선택한 노선의 데이터가 없습니다.")
+else:
+    value_2023 = selected_data["2023년"].iloc[0]
+    value_2025 = selected_data["2025년"].iloc[0]
+    change = selected_data["변화량"].iloc[0]
 
-    value_2023_line = df.loc[
-        df["연도"] == "2023",
-        line
-    ].iloc[0]
+    col1, col2, col3 = st.columns(3)
 
-    value_2025_line = df.loc[
-        df["연도"] == "2025",
-        line
-    ].iloc[0]
+    with col1:
+        st.metric(
+            "2023년 혼잡도",
+            f"{value_2023:.1f}%"
+        )
 
-    comparison.append({
-        "노선": line,
-        "2023년": value_2023_line,
-        "2025년": value_2025_line,
-        "변화량": value_2025_line - value_2023_line
+    with col2:
+        st.metric(
+            "2025년 혼잡도",
+            f"{value_2025:.1f}%"
+        )
+
+    with col3:
+        st.metric(
+            "변화량",
+            f"{change:+.1f}%p"
+        )
+
+    # -----------------------------------------
+    # 변화에 따른 자동 분석 문장
+    # -----------------------------------------
+    if change > 0:
+        st.error(
+            f"🔴 {selected_line}은(는) 2023년 대비 혼잡도가 "
+            f"**{change:.1f}%p 증가했습니다.**"
+        )
+
+    elif change < 0:
+        st.success(
+            f"🟢 {selected_line}은(는) 2023년 대비 혼잡도가 "
+            f"**{abs(change):.1f}%p 감소했습니다.**"
+        )
+
+    else:
+        st.info(
+            f"🔵 {selected_line}은(는) 2023년과 2025년의 "
+            f"혼잡도가 **변화하지 않았습니다.**"
+        )
+
+    # -----------------------------------------
+    # 선택한 노선 그래프
+    # -----------------------------------------
+    selected_graph = pd.DataFrame({
+        "연도": ["2023년", "2025년"],
+        "혼잡도": [value_2023, value_2025]
     })
 
-comparison_df = pd.DataFrame(comparison)
+    fig_selected = px.bar(
+        selected_graph,
+        x="연도",
+        y="혼잡도",
+        text="혼잡도",
+        title=f"{selected_line} 혼잡도 변화",
+        labels={
+            "연도": "연도",
+            "혼잡도": "혼잡도 (%)"
+        }
+    )
 
-long_df = comparison_df.melt(
-    id_vars="노선",
-    value_vars=[
-        "2023년",
-        "2025년"
-    ],
-    var_name="연도",
-    value_name="혼잡도"
-)
+    fig_selected.update_traces(
+        texttemplate="%{text:.1f}%",
+        textposition="outside"
+    )
 
-fig2 = px.bar(
-    long_df,
-    x="노선",
-    y="혼잡도",
-    color="연도",
-    barmode="group",
-    title="2023년과 2025년 노선별 혼잡도 비교",
-    text_auto=".1f",
-    labels={
-        "노선": "지하철 노선",
-        "혼잡도": "평균 혼잡도 (%)"
-    }
-)
+    st.plotly_chart(
+        fig_selected,
+        use_container_width=True
+    )
 
-st.plotly_chart(
-    fig2,
-    use_container_width=True
-)
-
-# ==================================================
-# 혼잡도 변화량
-# ==================================================
-
-st.header("📉 노선별 혼잡도 변화량")
-
-change_df = comparison_df.sort_values(
-    "변화량",
-    ascending=False
-)
-
-fig3 = px.bar(
-    change_df,
-    x="노선",
-    y="변화량",
-    title="2023년 → 2025년 혼잡도 변화량",
-    text_auto=".1f",
-    labels={
-        "노선": "지하철 노선",
-        "변화량": "변화량 (%p)"
-    }
-)
-
-fig3.add_hline(
-    y=0,
-    line_dash="dash"
-)
-
-st.plotly_chart(
-    fig3,
-    use_container_width=True
-)
-
-# ==================================================
-# TOP 5
-# ==================================================
-
-st.header("🔥 2025년 혼잡도 TOP 5")
-
-top5 = comparison_df[
-    ["노선", "2025년"]
-].sort_values(
-    "2025년",
-    ascending=False
-).head(5)
-
-st.dataframe(
-    top5,
-    hide_index=True,
-    use_container_width=True
-)
-
-# ==================================================
-# 정책 제안
-# ==================================================
-
-st.header("💡 데이터 기반 정책 제안")
-
-most_crowded = comparison_df.sort_values(
-    "2025년",
-    ascending=False
-).iloc[0]
-
-most_increased = comparison_df.sort_values(
-    "변화량",
-    ascending=False
-).iloc[0]
-
-most_decreased = comparison_df.sort_values(
-    "변화량",
-    ascending=True
-).iloc[0]
-
-st.markdown(
-    f"""
-    ### 분석 결과
-
-    - 2025년 가장 높은 혼잡도를 보인 노선은
-      **{most_crowded['노선']} ({most_crowded['2025년']:.1f}%)**입니다.
-    - 2023년 대비 혼잡도가 가장 크게 증가한 노선은
-      **{most_increased['노선']} ({most_increased['변화량']:+.1f}%p)**입니다.
-    - 혼잡도가 가장 크게 감소한 노선은
-      **{most_decreased['노선']} ({most_decreased['변화량']:+.1f}%p)**입니다.
-
-    ### 정책 제안
-
-    혼잡도가 높은 노선과 혼잡도가 증가한 노선을 중심으로
-    다음과 같은 정책을 고려할 수 있습니다.
-
-    1. 출퇴근 시간대 배차 간격 단축
-    2. 혼잡 노선의 추가 차량 투입
-    3. 혼잡 시간대 이용객 분산 유도
-    4. 혼잡 노선과 연결되는 대체 노선의 이용 활성화
-    """
-)
-
-# ==================================================
-# 원본 데이터
-# ==================================================
-
-with st.expander("📋 원본 데이터 확인"):
-
+# -----------------------------------------
+# 5. 원본 데이터 확인
+# -----------------------------------------
+with st.expander("📄 원본 데이터 보기"):
     st.dataframe(
         df,
         use_container_width=True
